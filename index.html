@@ -119,8 +119,6 @@
     const SPHERE_SEGMENTS = 32;
     const SPHERE_RINGS = 32;
     const HOLD_DURATION = 500; // milliseconds to consider a hold
-    const ENEMY_MODEL_PATH = 'enemy.obj';
-    const ENEMY_MODEL_SCALE = 0.02; // Adjust based on model size
     
     // ===========================================
     // Global variables
@@ -147,8 +145,7 @@
     let initialPositions = {};
     let grabOffset = new THREE.Vector3();
     let initialObjectPosition = new THREE.Vector3();
-    let enemyModel = null;
-    let enemyModelsLoaded = false;
+    let enemyModel; // Store the loaded enemy model
     
     // ===========================================
     // Debug logging
@@ -186,6 +183,69 @@
     }
     
     // ===========================================
+    // Load enemy OBJ model
+    // ===========================================
+    function loadEnemyModel() {
+      return new Promise((resolve, reject) => {
+        log('Loading enemy OBJ model');
+        const loader = new OBJLoader();
+        
+        loader.load(
+          'enemy.obj',
+          (object) => {
+            log('Enemy model loaded successfully');
+            
+            // Apply default material to model
+            object.traverse((child) => {
+              if (child instanceof THREE.Mesh) {
+                child.material = new THREE.MeshStandardMaterial({
+                  color: 0x44ff44,
+                  metalness: 0.3,
+                  roughness: 0.4,
+                  emissive: 0x44ff44,
+                  emissiveIntensity: 0.2
+                });
+                
+                // Make sure it casts shadows
+                child.castShadow = true;
+              }
+            });
+            
+            // Scale the model appropriately
+            object.scale.set(0.03, 0.03, 0.03);
+            
+            enemyModel = object;
+            resolve(object);
+          },
+          (xhr) => {
+            const percent = (xhr.loaded / xhr.total) * 100;
+            log(`Loading model: ${percent.toFixed(0)}%`);
+          },
+          (error) => {
+            log(`Error loading model: ${error}`);
+            reject(error);
+            
+            // Create fallback geometry
+            showStatus('Error loading model, using fallback', true);
+            const fallbackGeometry = new THREE.SphereGeometry(0.03, 16, 16);
+            const fallbackMaterial = new THREE.MeshStandardMaterial({
+              color: 0x44ff44,
+              metalness: 0.3,
+              roughness: 0.4,
+              emissive: 0x44ff44,
+              emissiveIntensity: 0.2
+            });
+            const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+            fallbackMesh.castShadow = true;
+            
+            enemyModel = fallbackMesh;
+            resolve(fallbackMesh);
+          }
+        );
+      });
+    }
+    
+    // ===========================================
     // Initialize Three.js scene
     // ===========================================
     function initScene() {
@@ -210,57 +270,7 @@
       
       window.addEventListener('resize', onWindowResize);
       
-      // Preload enemy model
-      loadEnemyModel();
-      
       log('Scene initialized');
-    }
-    
-    // ===========================================
-    // Load enemy.obj model
-    // ===========================================
-    function loadEnemyModel() {
-      log('Loading enemy model');
-      
-      const objLoader = new OBJLoader();
-      
-      objLoader.load(
-        ENEMY_MODEL_PATH,
-        (object) => {
-          enemyModel = object;
-          
-          // Apply standard material to model
-          enemyModel.traverse(function(child) {
-            if (child instanceof THREE.Mesh) {
-              child.material = new THREE.MeshStandardMaterial({
-                color: 0x888888,
-                metalness: 0.3,
-                roughness: 0.4,
-                emissive: 0x222222,
-                emissiveIntensity: 0.2
-              });
-              child.castShadow = true;
-            }
-          });
-          
-          enemyModel.scale.set(ENEMY_MODEL_SCALE, ENEMY_MODEL_SCALE, ENEMY_MODEL_SCALE);
-          
-          // Hide the model until we need it
-          enemyModel.visible = false;
-          scene.add(enemyModel);
-          
-          enemyModelsLoaded = true;
-          log('Enemy model loaded successfully');
-        },
-        (xhr) => {
-          log(`Enemy model ${(xhr.loaded / xhr.total * 100)}% loaded`);
-        },
-        (error) => {
-          log(`Error loading enemy model: ${error}`);
-          // Fallback to default sphere if model loading fails
-          enemyModelsLoaded = false;
-        }
-      );
     }
     
     // ===========================================
@@ -386,7 +396,7 @@
       log('Half-sphere created');
     }
     
-    // Create a plane with characters
+    // Create a plane with small character models
     function createPlane() {
       // Create a floating platform/plane
       const planeGeometry = new THREE.BoxGeometry(0.4, 0.02, 0.2);
@@ -416,20 +426,20 @@
       createCharacters();
     }
     
-    // Create characters on the plane
+    // Create characters - now using enemy models for yellow and green ones
     function createCharacters() {
       const colors = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44];
       
       for (let i = 0; i < 4; i++) {
         let character;
         
-        // Use enemy model for the green and yellow spheres (index 1 and 3)
-        if ((i === 1 || i === 3) && enemyModelsLoaded && enemyModel) {
+        // For index 1 (green) and 3 (yellow), use enemy model
+        if (i === 1 || i === 3) {
           // Clone the enemy model
           character = enemyModel.clone();
           
-          // Apply colored material based on original color assignments
-          character.traverse(function(child) {
+          // Apply color to the model
+          character.traverse((child) => {
             if (child instanceof THREE.Mesh) {
               child.material = new THREE.MeshStandardMaterial({
                 color: colors[i],
@@ -438,12 +448,12 @@
                 emissive: colors[i],
                 emissiveIntensity: 0.2
               });
+              child.castShadow = true;
             }
           });
-          
-          character.visible = true;
-        } else {
-          // Use spheres for other characters or as fallback
+        } 
+        // For others, use sphere
+        else {
           const size = 0.03;
           const geometry = new THREE.SphereGeometry(size, 16, 16);
           const material = new THREE.MeshStandardMaterial({
@@ -455,11 +465,11 @@
           });
           
           character = new THREE.Mesh(geometry, material);
+          character.castShadow = true;
         }
         
         const posX = (i % 2 === 0) ? -0.1 : 0.1;
         const posZ = (i < 2) ? -0.05 : 0.05;
-        
         character.position.set(posX, 0.03, posZ);
         
         character.userData = {
@@ -467,7 +477,7 @@
           index: i,
           originalPosition: character.position.clone(),
           originalRotation: character.rotation.clone(),
-          isEnemyModel: (i === 1 || i === 3) && enemyModelsLoaded
+          isEnemyModel: (i === 1 || i === 3)
         };
         
         initialPositions['character' + i] = character.position.clone();
@@ -494,11 +504,17 @@
           return;
         }
         
-        navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['hit-test'],
-          optionalFeatures: ['dom-overlay', 'hand-tracking'],
-          domOverlay: { root: document.body }
-        }).then(onSessionStarted);
+        // First load the enemy model
+        loadEnemyModel().then(() => {
+          // Once the model is loaded, start the AR session
+          navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test'],
+            optionalFeatures: ['dom-overlay', 'hand-tracking'],
+            domOverlay: { root: document.body }
+          }).then(onSessionStarted);
+        }).catch(error => {
+          showStatus('Error loading model: ' + error, false);
+        });
       });
     }
     
@@ -737,25 +753,45 @@
     function highlightObject(object, isHighlighted) {
       if (!object) return;
       
-      const applyHighlight = (material) => {
-        if (material) {
-          material.emissive = new THREE.Color(isHighlighted ? 0x0088ff : 0x000000);
-          material.emissiveIntensity = isHighlighted ? 0.5 : 0;
-        }
-      };
-      
-      // Handle both simple meshes and complex models
+      // For enemy models, we need to traverse their children
       if (object.userData && object.userData.isEnemyModel) {
-        object.traverse(function(child) {
-          if (child instanceof THREE.Mesh) {
-            applyHighlight(child.material);
+        object.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            if (isHighlighted) {
+              child.material.emissive = new THREE.Color(0x0088ff);
+              child.material.emissiveIntensity = 0.5;
+            } else {
+              // Reset to original color based on the index
+              const index = object.userData.index;
+              const colors = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44];
+              child.material.emissive = new THREE.Color(colors[index]);
+              child.material.emissiveIntensity = 0.2;
+            }
           }
         });
-      } else if (object.material) {
-        if (Array.isArray(object.material)) {
-          object.material.forEach(mat => applyHighlight(mat));
+      } 
+      // Regular objects with direct materials
+      else if (object.material) {
+        if (isHighlighted) {
+          if (Array.isArray(object.material)) {
+            object.material.forEach(mat => {
+              mat.emissive = new THREE.Color(0x0088ff);
+              mat.emissiveIntensity = 0.5;
+            });
+          } else {
+            object.material.emissive = new THREE.Color(0x0088ff);
+            object.material.emissiveIntensity = 0.5;
+          }
         } else {
-          applyHighlight(object.material);
+          if (Array.isArray(object.material)) {
+            object.material.forEach(mat => {
+              mat.emissive = new THREE.Color(0x000000);
+              mat.emissiveIntensity = 0;
+            });
+          } else {
+            object.material.emissive = new THREE.Color(0x000000);
+            object.material.emissiveIntensity = 0;
+          }
         }
       }
     }
